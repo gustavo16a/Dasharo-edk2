@@ -1,0 +1,14 @@
+{
+  "Payloads": [
+    {
+      "Payload": "inner_coreboot.cap",
+      "Guid": "00112233-4455-6677-8899-aabbccddeeff",
+      "FwVersion": "0x00000001",
+      "LowestSupportedVersion": "0x00000000",
+
+      "OpenSslSignerPrivateCertFile": "BaseTools/Source/Python/Pkcs7Sign/TestCert.pem",
+      "OpenSslOtherPublicCertFile": "BaseTools/Source/Python/Pkcs7Sign/TestSub.pub.pem",
+      "OpenSslTrustedPublicCertFile": "BaseTools/Source/Python/Pkcs7Sign/TestRoot.pub.pem"
+    }
+  ]
+}

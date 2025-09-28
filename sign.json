@@ -1,0 +1,19 @@
+{
+  "EmbeddedDrivers": [
+    {
+      "Driver": "../Build/DasharoPayloadPkgX64/DEBUG_COREBOOT/X64/FmpDxe.efi"
+    }
+  ],
+  "Payloads": [
+    {
+      "Payload": "../../../../../build/coreboot.rom",
+      "Guid": "20651b14-8653-4d9b-a75a-67fa76e0ada5",
+      "FwVersion": "0x00020102",
+      "LowestSupportedVersion": "0x00020101",
+
+      "OpenSslSignerPrivateCertFile": "BaseTools/Source/Python/Pkcs7Sign/TestCert.pem",
+      "OpenSslOtherPublicCertFile": "BaseTools/Source/Python/Pkcs7Sign/TestSub.pub.pem",
+      "OpenSslTrustedPublicCertFile": "BaseTools/Source/Python/Pkcs7Sign/TestRoot.pub.pem"
+    }
+  ]
+}
