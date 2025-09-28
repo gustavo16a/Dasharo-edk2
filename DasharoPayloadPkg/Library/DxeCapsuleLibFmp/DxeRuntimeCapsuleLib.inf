@@ -36,6 +36,7 @@
 [Packages]
   MdePkg/MdePkg.dec
   MdeModulePkg/MdeModulePkg.dec
+  SecurityPkg/SecurityPkg.dec
 
 [LibraryClasses]
   BaseLib
@@ -69,6 +70,9 @@
   gEfiEventExitBootServicesGuid           ## CONSUMES ## Event
   gEfiEventVirtualAddressChangeGuid       ## CONSUMES ## Event
   gEdkiiCapsuleOnDiskNameGuid             ## SOMETIMES_CONSUMES ## GUID
+
+[Pcd]
+  gEfiSecurityPkgTokenSpaceGuid.PcdPkcs7CertBuffer                           ## CONSUMES
 
 [Depex]
   gEfiVariableWriteArchProtocolGuid

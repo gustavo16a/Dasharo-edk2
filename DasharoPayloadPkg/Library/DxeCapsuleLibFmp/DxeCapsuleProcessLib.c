@@ -122,6 +122,40 @@ ValidateCapsuleNameCapsuleIntegrity (
   OUT UINTN               *CapsuleNameNum
   );
 
+
+/**
+  Validate Nested Fmp capsules layout.
+
+  Caution: This function may receive untrusted input.
+
+  This function assumes the caller validated the capsule by using
+  IsValidCapsuleHeader(), so that all fields in EFI_CAPSULE_HEADER are correct.
+  The capsule buffer size is CapsuleHeader->CapsuleImageSize.
+
+  This function validates the fields in EFI_FIRMWARE_MANAGEMENT_CAPSULE_HEADER
+  and EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER.
+
+  This function checks if the payload is an FMP capsule
+
+  @param[in, out] CapsuleHeader         Points to a capsule header.
+                                        On input this parameter points to the top capsule header.
+                                        On output this parameter points to the inner capsule header,
+                                        if it exists and all operations succeeds.
+  @param[out]     EmbeddedDriverCount   If the inner capsule exists, this parameter returns
+                                        the EmbeddedDriverCount in the inner FMP capsule.
+
+  @retval EFI_SUCCESS             The payload is an FMP capsule.
+  @retval EFI_INVALID_PARAMETER   Top capsule is not a valid FMP capsule.
+                                  Payload is not an FMP capsule or not valid FMP capsule.
+  @retval EFI_UNSUPPORTED         The top capsule is contains EmbeddedDriver or multiple payloads.
+  @retval EFI_SECURITY_VIOLATION  The inner capsule is not authentic.
+**/
+EFI_STATUS
+IsPayloadValidFmpCapsule (
+  IN EFI_CAPSULE_HEADER  **CapsuleHeader,
+  OUT UINT16             *EmbeddedDriverCount
+  );
+
 extern BOOLEAN  mDxeCapsuleLibEndOfDxe;
 BOOLEAN         mNeedReset = FALSE;
 
@@ -572,17 +606,33 @@ ProcessTheseCapsules (
       // Call capsule library to process capsule image.
       //
       EmbeddedDriverCount = 0;
-      if (IsFmpCapsule (CapsuleHeader)) {
-        Status = ValidateFmpCapsule (CapsuleHeader, &EmbeddedDriverCount);
-        if (EFI_ERROR (Status)) {
-          DEBUG ((DEBUG_ERROR, "ValidateFmpCapsule failed. Ignore!\n"));
-          mCapsuleStatusArray[Index] = EFI_ABORTED;
-          continue;
-        }
-      } else {
+      if (!IsFmpCapsule (CapsuleHeader)) {
         mCapsuleStatusArray[Index] = EFI_ABORTED;
         continue;
       }
+
+      Status = ValidateFmpCapsule (CapsuleHeader, &EmbeddedDriverCount);
+      if (EFI_ERROR (Status)) {
+        DEBUG ((DEBUG_ERROR, "ValidateFmpCapsule failed. Ignore!\n"));
+        mCapsuleStatusArray[Index] = EFI_ABORTED;
+        continue;
+      }
+
+      if (EmbeddedDriverCount != 0){
+        DEBUG ((DEBUG_ERROR, "Top Capsule has embedded drivers. Ignore!\n"));
+        mCapsuleStatusArray[Index] = EFI_ABORTED;
+        continue;
+      }
+    
+      DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule - 0x%x\n", CapsuleHeader));
+      Status = IsPayloadValidFmpCapsule(&CapsuleHeader, &EmbeddedDriverCount);
+      if (EFI_ERROR (Status)) {
+        DEBUG ((DEBUG_ERROR, "IsPayloadValidFmpCapsule failed. Ignore - %r!\n", Status));
+        mCapsuleStatusArray[Index] = Status;
+        continue;
+      }
+      DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule->Exit - 0x%x\n", CapsuleHeader));
+      DEBUG ((DEBUG_INFO, "EmbeddedDriverCount: %d\n", EmbeddedDriverCount));
 
       if ((!FirstRound) || (EmbeddedDriverCount == 0)) {
         DEBUG ((DEBUG_INFO, "ProcessThisCapsuleImage - 0x%x\n", CapsuleHeader));

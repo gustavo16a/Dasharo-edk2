@@ -23,6 +23,7 @@
 #include <Guid/FmpCapsule.h>
 #include <Guid/SystemResourceTable.h>
 #include <Guid/EventGroup.h>
+#include <Guid/ImageAuthentication.h>
 
 #include <Library/BaseLib.h>
 #include <Library/DebugLib.h>
@@ -35,6 +36,8 @@
 #include <Library/DevicePathLib.h>
 #include <Library/UefiLib.h>
 #include <Library/BmpSupportLib.h>
+#include <Library/FmpAuthenticationLib.h>
+#include <Library/PcdLib.h>
 
 #include <Protocol/GraphicsOutput.h>
 #include <Protocol/EsrtManagement.h>
@@ -50,6 +53,22 @@ EFI_EVENT  mDxeCapsuleLibEndOfDxeEvent = NULL;
 EDKII_FIRMWARE_MANAGEMENT_PROGRESS_PROTOCOL  *mFmpProgress = NULL;
 
 BOOLEAN  mDxeCapsuleLibIsExitBootService = FALSE;
+
+///
+/// Define FMP Payload Header structure here so it is not public
+/// Copied from FmpDevicePkg/Library/FmpPayloadHeaderLibV1/FmpPayloadHeaderLib.c
+///
+
+#pragma pack(1)
+
+typedef struct {
+  UINT32    Signature;
+  UINT32    HeaderSize;
+  UINT32    FwVersion;
+  UINT32    LowestSupportedVersion;
+} FMP_PAYLOAD_HEADER;
+
+#pragma pack()
 
 /**
   Initialize capsule related variables.
@@ -1692,5 +1711,190 @@ DxeCapsuleLibDestructor (
   Status = gBS->CloseEvent (mDxeCapsuleLibEndOfDxeEvent);
   ASSERT_EFI_ERROR (Status);
 
+  return EFI_SUCCESS;
+}
+
+/**
+  Validate Nested Fmp capsules layout.
+
+  Caution: This function may receive untrusted input.
+
+  This function assumes the caller validated the capsule by using
+  IsValidCapsuleHeader(), so that all fields in EFI_CAPSULE_HEADER are correct.
+  The capsule buffer size is CapsuleHeader->CapsuleImageSize.
+
+  This function validates the fields in EFI_FIRMWARE_MANAGEMENT_CAPSULE_HEADER
+  and EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER.
+
+  This function checks if the payload is an FMP capsule
+
+  @param[in, out] CapsuleHeader         Points to a capsule header.
+                                        On input this parameter points to the top capsule header.
+                                        On output this parameter points to the inner capsule header,
+                                        if it exists and all operations succeeds.
+  @param[out]     EmbeddedDriverCount   If the inner capsule exists, this parameter returns
+                                        the EmbeddedDriverCount in the inner FMP capsule.
+
+  @retval EFI_SUCCESS             The payload is an FMP capsule.
+  @retval EFI_INVALID_PARAMETER   Top capsule is not a valid FMP capsule.
+                                  Payload is not an FMP capsule or not valid FMP capsule.
+  @retval EFI_UNSUPPORTED         The top capsule is contains EmbeddedDriver or multiple payloads.
+  @retval EFI_SECURITY_VIOLATION  The inner capsule is not authentic.
+**/
+EFI_STATUS
+IsPayloadValidFmpCapsule (
+  IN OUT EFI_CAPSULE_HEADER  **CapsuleHeader,
+  OUT UINT16                 *EmbeddedDriverCount
+  )
+{
+  EFI_FIRMWARE_MANAGEMENT_CAPSULE_HEADER        *FmpCapsuleHeader;
+  EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER  *ImageHeader;
+  EFI_FIRMWARE_IMAGE_AUTHENTICATION             *ImageAuthenticationHeader;
+  UINT8                                         *StartOfPayload;
+  UINT64                                        *ItemOffsetList;
+  EFI_STATUS                                    Status;
+  UINT8                                         *Image;
+  EFI_CAPSULE_HEADER                            *NestedCapsuleHeader;
+  EFI_CAPSULE_HEADER                            *TopCapsuleHeader;
+  UINTN                                         NestedCapsuleSize;
+  UINTN                                         TopCapsulePayloadSize;
+  GUID                                          *CertType;
+  VOID                                          *PublicKeyData;
+  UINTN                                         PublicKeyDataLength;
+  UINT16                                        NestedEmbeddedDriverCount;
+
+  DEBUG ((DEBUG_ERROR, "Checking if Capsule is Null\n"));
+  if ((*CapsuleHeader) == NULL) {
+    return EFI_INVALID_PARAMETER;
+  }
+  DEBUG ((DEBUG_ERROR, "Dereferencing the capsule\n"));
+  TopCapsuleHeader = *CapsuleHeader;
+
+  DEBUG ((DEBUG_INFO, "CapsuleHeaderAddress - 0x%x\n", *CapsuleHeader));
+  DEBUG ((DEBUG_INFO, "TopCapsuleHeaderAddress - 0x%x\n", TopCapsuleHeader));
+  DEBUG ((DEBUG_ERROR, "Validating top Capsule\n"));
+  Status = ValidateFmpCapsule (TopCapsuleHeader, NULL);
+  if (EFI_ERROR (Status)) {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  FmpCapsuleHeader = (EFI_FIRMWARE_MANAGEMENT_CAPSULE_HEADER *)((UINT8 *)TopCapsuleHeader + TopCapsuleHeader->HeaderSize);
+  if (FmpCapsuleHeader->PayloadItemCount != 1) {
+    DEBUG ((DEBUG_ERROR, "Multiple payloads in the top capsule\n"));
+    return EFI_UNSUPPORTED;
+  }
+  
+  if (FmpCapsuleHeader->EmbeddedDriverCount != 0) {
+    DEBUG ((DEBUG_ERROR, "Embedded driver inside the top capsule\n"));
+    return EFI_UNSUPPORTED;    
+  }
+
+  ItemOffsetList = (UINT64 *)(FmpCapsuleHeader + 1);
+  ImageHeader = (EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER *)((UINT8 *)FmpCapsuleHeader + ItemOffsetList[0]);
+
+  if (ImageHeader->Version >= EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER_INIT_VERSION) {
+  Image = (UINT8 *)(ImageHeader + 1);
+  } else {
+    //
+    // If the EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER is version 1,
+    // Header should exclude UpdateHardwareInstance field, and
+    // ImageCapsuleSupport field if version is 2.
+    //
+    if (ImageHeader->Version == 1) {
+      Image = (UINT8 *)ImageHeader + OFFSET_OF (EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER, UpdateHardwareInstance);
+    } else {
+      Image = (UINT8 *)ImageHeader + OFFSET_OF (EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER, ImageCapsuleSupport);
+    }
+  }
+
+  ImageAuthenticationHeader = (EFI_FIRMWARE_IMAGE_AUTHENTICATION *) Image;
+
+  //
+  // Check to make sure that operation can be safely performed.
+  //
+  if ((((UINTN)ImageAuthenticationHeader + sizeof (ImageAuthenticationHeader->MonotonicCount) + ImageAuthenticationHeader->AuthInfo.Hdr.dwLength) < (UINTN)ImageAuthenticationHeader) || \
+      (((UINTN)ImageAuthenticationHeader + sizeof (ImageAuthenticationHeader->MonotonicCount) + ImageAuthenticationHeader->AuthInfo.Hdr.dwLength) >= (UINTN)ImageAuthenticationHeader + ImageHeader->UpdateImageSize))
+  {
+    //
+    // Pointer overflow. Invalid image.
+    //
+    DEBUG ((DEBUG_INFO, "Pointer overflow. Invalid image.\n"));
+    return EFI_INVALID_PARAMETER;
+  }
+
+  StartOfPayload = (UINT8 *) ImageAuthenticationHeader + ImageAuthenticationHeader->AuthInfo.Hdr.dwLength + sizeof (ImageAuthenticationHeader->MonotonicCount);
+  TopCapsulePayloadSize = ImageHeader->UpdateImageSize - (sizeof (ImageAuthenticationHeader->MonotonicCount) + ImageAuthenticationHeader->AuthInfo.Hdr.dwLength);
+
+  if (TopCapsulePayloadSize < sizeof (EFI_CAPSULE_HEADER) + sizeof (FMP_PAYLOAD_HEADER)) {
+    DEBUG ((DEBUG_INFO, "TopCapsulePayloadSize < sizeof (EFI_CAPSULE_HEADER) + sizeof (FMP_PAYLOAD_HEADER)\n"));
+    return EFI_INVALID_PARAMETER;
+  }
+  
+  NestedCapsuleHeader = (EFI_CAPSULE_HEADER*) ((UINT8 *)StartOfPayload + sizeof(FMP_PAYLOAD_HEADER));
+  NestedCapsuleSize   = (UINTN)TopCapsuleHeader + TopCapsuleHeader->CapsuleImageSize - (UINTN)NestedCapsuleHeader;
+
+  DEBUG ((DEBUG_INFO, "NestedCapsuleHeader - 0x%x\n", NestedCapsuleHeader));
+  DEBUG ((DEBUG_INFO, "NestedCapsuleSize - 0x%x\n", NestedCapsuleSize));
+  
+  if (NestedCapsuleSize < sizeof (EFI_CAPSULE_HEADER)) {
+    DEBUG ((DEBUG_INFO, "NestedCapsuleSize < sizeof (EFI_CAPSULE_HEADER)\n"));
+    return EFI_INVALID_PARAMETER;
+  }
+  if (!IsValidCapsuleHeader (NestedCapsuleHeader, NestedCapsuleSize)) {
+    DEBUG ((DEBUG_INFO, "Payload is not a capsule\n"));
+    return EFI_INVALID_PARAMETER;
+  }
+
+  if (!IsFmpCapsuleGuid (&NestedCapsuleHeader->CapsuleGuid)) {
+    DEBUG ((DEBUG_INFO, "Payload Capsule is not Fmp capsule\nNestedCapsuleHeader->CapsuleGuid"));
+    return EFI_INVALID_PARAMETER;
+  }
+
+  Status = ValidateFmpCapsule (NestedCapsuleHeader, &NestedEmbeddedDriverCount);
+  if (EFI_ERROR (Status)) {
+    DEBUG ((DEBUG_INFO, "Fmp Payload Capsule is invalid\n"));
+    return EFI_INVALID_PARAMETER;
+  }
+
+  if (!(
+         (CompareGuid(&TopCapsuleHeader->CapsuleGuid, &NestedCapsuleHeader->CapsuleGuid)) &&
+         (TopCapsuleHeader->HeaderSize == NestedCapsuleHeader->HeaderSize) &&
+         (TopCapsuleHeader->Flags == NestedCapsuleHeader->Flags)
+       )
+     ) 
+    {
+      DEBUG ((DEBUG_INFO, "Parameters of inner and top capsule doesn't match!\n"));
+      return EFI_INVALID_PARAMETER;
+    }
+
+  CertType = &ImageAuthenticationHeader->AuthInfo.CertType;
+  DEBUG ((DEBUG_INFO, "ExtractAuthenticatedImage - CertType: %g\n", CertType));
+  
+  if (CompareGuid (&gEfiCertPkcs7Guid, CertType)) {
+    PublicKeyData       = PcdGetPtr (PcdPkcs7CertBuffer);
+    PublicKeyDataLength = PcdGetSize (PcdPkcs7CertBuffer);
+  } else {
+    return EFI_INVALID_PARAMETER;
+  }
+
+  ASSERT (PublicKeyData != NULL);
+  ASSERT (PublicKeyDataLength != 0);
+
+  Status = AuthenticateFmpImage (
+             ImageAuthenticationHeader,
+             ImageHeader->UpdateImageSize,
+             PublicKeyData,
+             PublicKeyDataLength
+             );
+  if (EFI_ERROR (Status)) {
+    return EFI_SECURITY_VIOLATION;
+  }
+
+  if (EmbeddedDriverCount != NULL) {
+    *EmbeddedDriverCount = NestedEmbeddedDriverCount;
+  }
+
+  *CapsuleHeader = NestedCapsuleHeader;
+  DEBUG ((DEBUG_INFO, "Payload is valid Fmp Capsule\n"));
   return EFI_SUCCESS;
 }
