@@ -529,7 +529,7 @@ OrderedCollectionLib|MdePkg/Library/BaseOrderedCollectionRedBlackTreeLib/BaseOrd
   gEfiMdeModulePkgTokenSpaceGuid.PcdSdMmcGenericTimeoutValue|$(SD_MMC_TIMEOUT)
   gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleFmpSupport|$(CAPSULE_SUPPORT)
 !if $(CAPSULE_SUPPORT) == TRUE
-  !include BaseTools/Source/Python/Pkcs7Sign/TestRoot.cer.gEfiSecurityPkgTokenSpaceGuid.PcdPkcs7CertBuffer.inc
+  !include DasharoPayloadPkg/CapsuleRootKey.inc
 !endif
 
   gDasharoPayloadPkgTokenSpaceGuid.PcdSerialOnSuperIo|$(UART_ON_SUPERIO)
@@ -817,7 +817,7 @@ OrderedCollectionLib|MdePkg/Library/BaseOrderedCollectionRedBlackTreeLib/BaseOrd
       #
       # See BaseTools/Source/Python/Pkcs7Sign/Readme.md for more details on such
       # PCDs and include files.
-      !include DasharoPayloadPkg/CapsuleRootKey.inc
+      !include BaseTools/Source/Python/Pkcs7Sign/TestRoot.cer.gFmpDevicePkgTokenSpaceGuid.PcdFmpDevicePkcs7CertBufferXdr.inc
   }
   MdeModulePkg/Application/CapsuleApp/CapsuleApp.inf
   MdeModulePkg/Universal/EsrtDxe/EsrtDxe.inf

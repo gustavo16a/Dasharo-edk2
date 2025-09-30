@@ -123,6 +123,7 @@ ValidateCapsuleNameCapsuleIntegrity (
   );
 
 
+// TODO: define in a new internal header
 /**
   Validate Nested Fmp capsules layout.
 
@@ -613,22 +614,29 @@ ProcessTheseCapsules (
 
       Status = ValidateFmpCapsule (CapsuleHeader, &EmbeddedDriverCount);
       if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "ValidateFmpCapsule failed. Ignore!\n"));
+        DEBUG ((DEBUG_ERROR, "ValidateFmpCapsule failed with %r. Ignore!\n", Status));
         mCapsuleStatusArray[Index] = EFI_ABORTED;
         continue;
       }
 
+      // XXX: IsPayloadValidFmpCapsule() has the same check 
       if (EmbeddedDriverCount != 0){
         DEBUG ((DEBUG_ERROR, "Top Capsule has embedded drivers. Ignore!\n"));
         mCapsuleStatusArray[Index] = EFI_ABORTED;
         continue;
       }
-    
+
+      // TODO: this block should be guarded by a PCD check or use a different GUID for outer capsules
       DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule - 0x%x\n", CapsuleHeader));
-      Status = IsPayloadValidFmpCapsule(&CapsuleHeader, &EmbeddedDriverCount);
+      // TODO: name should suggest nested capsules
+      Status = IsPayloadValidFmpCapsule (&CapsuleHeader, &EmbeddedDriverCount);
       if (EFI_ERROR (Status)) {
         DEBUG ((DEBUG_ERROR, "IsPayloadValidFmpCapsule failed. Ignore - %r!\n", Status));
-        mCapsuleStatusArray[Index] = Status;
+        // XXX: could use EFI_ABORTED for consistency or store Status above as well 
+        //      Either way this leaves the user with no feedback, may need to use
+        //      SetLastAttemptStatusInVariable () from FmpDxe, so `CapsuleApp.efi -S`
+        //      or something else could report the error.
+        mCapsuleStatusArray[Index] = EFI_ABORTED;
         continue;
       }
       DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule->Exit - 0x%x\n", CapsuleHeader));

@@ -70,7 +70,7 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleOnDiskSupport                     ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdCodRelocationDevPath                     ## SOMETIMES_CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdCoDRelocationFileName                    ## CONSUMES
-  gEfiSecurityPkgTokenSpaceGuid.PcdPkcs7CertBuffer                           ## CONSUMES
+  gEfiSecurityPkgTokenSpaceGuid.PcdPkcs7CertBuffer                           ## SOMETIMES_CONSUMES
 
 [FeaturePcd]
   gEfiMdeModulePkgTokenSpaceGuid.PcdSupportUpdateCapsuleReset ## CONSUMES
@@ -100,7 +100,7 @@
   ## SOMETIMES_PRODUCES ## Variable:L"BootNext"
   gEfiGlobalVariableGuid
   gEdkiiCapsuleOnDiskNameGuid             ## SOMETIMES_CONSUMES ## GUID
-  gEfiCertPkcs7Guid                       ## CONSUMES   ## GUID
+  gEfiCertPkcs7Guid                       ## SOMETIMES_CONSUMES ## GUID
 
 [Depex]
   gEfiVariableWriteArchProtocolGuid
