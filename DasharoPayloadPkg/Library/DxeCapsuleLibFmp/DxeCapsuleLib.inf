@@ -31,6 +31,7 @@
   DxeCapsuleReportLib.c
   CapsuleOnDisk.c
   CapsuleOnDisk.h
+  NestedFmpCapsule.h
 
 [Packages]
   MdePkg/MdePkg.dec
@@ -70,6 +71,7 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleOnDiskSupport                     ## CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdCodRelocationDevPath                     ## SOMETIMES_CONSUMES
   gEfiMdeModulePkgTokenSpaceGuid.PcdCoDRelocationFileName                    ## CONSUMES
+  gEfiMdeModulePkgTokenSpaceGuid.PcdUseNestedFmpCapsuleFormat                ## CONSUMES
   gEfiSecurityPkgTokenSpaceGuid.PcdPkcs7CertBuffer                           ## SOMETIMES_CONSUMES
 
 [FeaturePcd]

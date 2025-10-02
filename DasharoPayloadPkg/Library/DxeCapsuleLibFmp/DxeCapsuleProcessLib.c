@@ -32,6 +32,7 @@
 #include <Library/DisplayUpdateProgressLib.h>
 
 #include <IndustryStandard/WindowsUxCapsule.h>
+#include "NestedFmpCapsule.h"
 
 extern EDKII_FIRMWARE_MANAGEMENT_PROGRESS_PROTOCOL  *mFmpProgress;
 
@@ -120,41 +121,6 @@ EFI_PHYSICAL_ADDRESS *
 ValidateCapsuleNameCapsuleIntegrity (
   IN  EFI_CAPSULE_HEADER  *CapsuleHeader,
   OUT UINTN               *CapsuleNameNum
-  );
-
-
-// TODO: define in a new internal header
-/**
-  Validate Nested Fmp capsules layout.
-
-  Caution: This function may receive untrusted input.
-
-  This function assumes the caller validated the capsule by using
-  IsValidCapsuleHeader(), so that all fields in EFI_CAPSULE_HEADER are correct.
-  The capsule buffer size is CapsuleHeader->CapsuleImageSize.
-
-  This function validates the fields in EFI_FIRMWARE_MANAGEMENT_CAPSULE_HEADER
-  and EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER.
-
-  This function checks if the payload is an FMP capsule
-
-  @param[in, out] CapsuleHeader         Points to a capsule header.
-                                        On input this parameter points to the top capsule header.
-                                        On output this parameter points to the inner capsule header,
-                                        if it exists and all operations succeeds.
-  @param[out]     EmbeddedDriverCount   If the inner capsule exists, this parameter returns
-                                        the EmbeddedDriverCount in the inner FMP capsule.
-
-  @retval EFI_SUCCESS             The payload is an FMP capsule.
-  @retval EFI_INVALID_PARAMETER   Top capsule is not a valid FMP capsule.
-                                  Payload is not an FMP capsule or not valid FMP capsule.
-  @retval EFI_UNSUPPORTED         The top capsule is contains EmbeddedDriver or multiple payloads.
-  @retval EFI_SECURITY_VIOLATION  The inner capsule is not authentic.
-**/
-EFI_STATUS
-IsPayloadValidFmpCapsule (
-  IN EFI_CAPSULE_HEADER  **CapsuleHeader,
-  OUT UINT16             *EmbeddedDriverCount
   );
 
 extern BOOLEAN  mDxeCapsuleLibEndOfDxe;
@@ -619,28 +585,17 @@ ProcessTheseCapsules (
         continue;
       }
 
-      // XXX: IsPayloadValidFmpCapsule() has the same check 
-      if (EmbeddedDriverCount != 0){
-        DEBUG ((DEBUG_ERROR, "Top Capsule has embedded drivers. Ignore!\n"));
-        mCapsuleStatusArray[Index] = EFI_ABORTED;
-        continue;
+      if (PcdGetBool (PcdUseNestedFmpCapsuleFormat)) {
+        DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule - 0x%x\n", CapsuleHeader));
+        Status = IsPayloadValidFmpCapsule(&CapsuleHeader, &EmbeddedDriverCount);
+        if (EFI_ERROR (Status)) {
+          DEBUG ((DEBUG_ERROR, "IsPayloadValidFmpCapsule failed. Ignore - %r!\n", Status));
+          mCapsuleStatusArray[Index] = EFI_ABORTED;
+          continue;
+        }
+        DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule->Exit - 0x%x\n", CapsuleHeader));
+        DEBUG ((DEBUG_INFO, "New EmbeddedDriverCount: %d\n", EmbeddedDriverCount));
       }
-
-      // TODO: this block should be guarded by a PCD check or use a different GUID for outer capsules
-      DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule - 0x%x\n", CapsuleHeader));
-      // TODO: name should suggest nested capsules
-      Status = IsPayloadValidFmpCapsule (&CapsuleHeader, &EmbeddedDriverCount);
-      if (EFI_ERROR (Status)) {
-        DEBUG ((DEBUG_ERROR, "IsPayloadValidFmpCapsule failed. Ignore - %r!\n", Status));
-        // XXX: could use EFI_ABORTED for consistency or store Status above as well 
-        //      Either way this leaves the user with no feedback, may need to use
-        //      SetLastAttemptStatusInVariable () from FmpDxe, so `CapsuleApp.efi -S`
-        //      or something else could report the error.
-        mCapsuleStatusArray[Index] = EFI_ABORTED;
-        continue;
-      }
-      DEBUG ((DEBUG_INFO, "IsPayloadValidFmpCapsule->Exit - 0x%x\n", CapsuleHeader));
-      DEBUG ((DEBUG_INFO, "EmbeddedDriverCount: %d\n", EmbeddedDriverCount));
 
       if ((!FirstRound) || (EmbeddedDriverCount == 0)) {
         DEBUG ((DEBUG_INFO, "ProcessThisCapsuleImage - 0x%x\n", CapsuleHeader));

@@ -44,6 +44,7 @@
 #include <Protocol/FirmwareManagement.h>
 #include <Protocol/FirmwareManagementProgress.h>
 #include <Protocol/DevicePath.h>
+#include "NestedFmpCapsule.h"
 
 EFI_SYSTEM_RESOURCE_TABLE  *mEsrtTable = NULL;
 
@@ -53,24 +54,6 @@ EFI_EVENT  mDxeCapsuleLibEndOfDxeEvent = NULL;
 EDKII_FIRMWARE_MANAGEMENT_PROGRESS_PROTOCOL  *mFmpProgress = NULL;
 
 BOOLEAN  mDxeCapsuleLibIsExitBootService = FALSE;
-
-// TODO: define in a new internal header
-//       also, this whole library should not be copied
-///
-/// Define FMP Payload Header structure here so it is not public
-/// Copied from FmpDevicePkg/Library/FmpPayloadHeaderLibV1/FmpPayloadHeaderLib.c
-///
-
-#pragma pack(1)
-
-typedef struct {
-  UINT32    Signature;
-  UINT32    HeaderSize;
-  UINT32    FwVersion;
-  UINT32    LowestSupportedVersion;
-} FMP_PAYLOAD_HEADER;
-
-#pragma pack()
 
 /**
   Initialize capsule related variables.
@@ -1743,6 +1726,7 @@ DxeCapsuleLibDestructor (
                                   Signature is using an unexpected format.
   @retval EFI_UNSUPPORTED         The top capsule is contains EmbeddedDriver or multiple payloads.
   @retval EFI_SECURITY_VIOLATION  The inner capsule is not authentic.
+  @retval Others                  Statuses returned by AuthenticateFmpImage
 **/
 EFI_STATUS
 IsPayloadValidFmpCapsule (
@@ -1768,6 +1752,7 @@ IsPayloadValidFmpCapsule (
 
   DEBUG ((DEBUG_ERROR, "Checking if Capsule is Null\n"));
   if ((*CapsuleHeader) == NULL) {
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
   DEBUG ((DEBUG_ERROR, "Dereferencing the capsule\n"));
@@ -1778,17 +1763,20 @@ IsPayloadValidFmpCapsule (
   DEBUG ((DEBUG_ERROR, "Validating top Capsule\n"));
   Status = ValidateFmpCapsule (TopCapsuleHeader, NULL);
   if (EFI_ERROR (Status)) {
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
 
   FmpCapsuleHeader = (EFI_FIRMWARE_MANAGEMENT_CAPSULE_HEADER *)((UINT8 *)TopCapsuleHeader + TopCapsuleHeader->HeaderSize);
   if (FmpCapsuleHeader->PayloadItemCount != 1) {
     DEBUG ((DEBUG_ERROR, "Multiple payloads in the top capsule\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_UNSUPPORTED);
     return EFI_UNSUPPORTED;
   }
 
   if (FmpCapsuleHeader->EmbeddedDriverCount != 0) {
     DEBUG ((DEBUG_ERROR, "Embedded driver inside the top capsule\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_UNSUPPORTED);
     return EFI_UNSUPPORTED;
   }
 
@@ -1822,6 +1810,7 @@ IsPayloadValidFmpCapsule (
     // Pointer overflow. Invalid image.
     //
     DEBUG ((DEBUG_INFO, "Pointer overflow. Invalid image.\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
 
@@ -1830,6 +1819,7 @@ IsPayloadValidFmpCapsule (
 
   if (TopCapsulePayloadSize < sizeof (EFI_CAPSULE_HEADER) + sizeof (FMP_PAYLOAD_HEADER)) {
     DEBUG ((DEBUG_INFO, "TopCapsulePayloadSize < sizeof (EFI_CAPSULE_HEADER) + sizeof (FMP_PAYLOAD_HEADER)\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
 
@@ -1841,21 +1831,25 @@ IsPayloadValidFmpCapsule (
 
   if (NestedCapsuleSize < sizeof (EFI_CAPSULE_HEADER)) {
     DEBUG ((DEBUG_INFO, "NestedCapsuleSize < sizeof (EFI_CAPSULE_HEADER)\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
   if (!IsValidCapsuleHeader (NestedCapsuleHeader, NestedCapsuleSize)) {
     DEBUG ((DEBUG_INFO, "Payload is not a capsule\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
 
   if (!IsFmpCapsuleGuid (&NestedCapsuleHeader->CapsuleGuid)) {
     DEBUG ((DEBUG_INFO, "Payload Capsule is not Fmp capsule\nNestedCapsuleHeader->CapsuleGuid"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
 
   Status = ValidateFmpCapsule (NestedCapsuleHeader, &NestedEmbeddedDriverCount);
   if (EFI_ERROR (Status)) {
     DEBUG ((DEBUG_INFO, "Fmp Payload Capsule is invalid\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
 
@@ -1868,6 +1862,7 @@ IsPayloadValidFmpCapsule (
      )
     {
       DEBUG ((DEBUG_INFO, "Parameters of inner and top capsule doesn't match!\n"));
+      RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
       return EFI_INVALID_PARAMETER;
     }
 
@@ -1878,7 +1873,8 @@ IsPayloadValidFmpCapsule (
     PublicKeyData       = PcdGetPtr (PcdPkcs7CertBuffer);
     PublicKeyDataLength = PcdGetSize (PcdPkcs7CertBuffer);
   } else {
-    // TODO: logging 
+    DEBUG ((DEBUG_INFO, "Platform Keys for Capsule Update using nested FMP capsule doesn't use Pkcs7 type\n"));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
     return EFI_INVALID_PARAMETER;
   }
 
@@ -1893,8 +1889,9 @@ IsPayloadValidFmpCapsule (
              PublicKeyDataLength
              );
   if (EFI_ERROR (Status)) {
-    // TODO: logging 
-    return EFI_SECURITY_VIOLATION;
+    DEBUG ((DEBUG_INFO, "AuthenticateFmpImage Status: %r\n", Status));
+    RecordCapsuleStatusVariable (TopCapsuleHeader, Status);
+    return Status;
   }
 
   // TODO: validate FMP_PAYLOAD_HEADER of top and bottom capsules matching each other? 

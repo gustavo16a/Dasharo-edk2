@@ -115,6 +115,7 @@
   DEFINE USE_UEFIVAR_BACKED_TPM_PPI     = FALSE
   DEFINE CAPSULE_SUPPORT                = FALSE
   DEFINE CAPSULE_MAIN_FW_GUID           =
+  DEFINE NESTED_FMP_CAPSULE_ENABLE      = FALSE
   DEFINE GRAPHICAL_CAPSULE_PROGRESS     = TRUE
 
   #
@@ -528,7 +529,10 @@ OrderedCollectionLib|MdePkg/Library/BaseOrderedCollectionRedBlackTreeLib/BaseOrd
 
   gEfiMdeModulePkgTokenSpaceGuid.PcdSdMmcGenericTimeoutValue|$(SD_MMC_TIMEOUT)
   gEfiMdeModulePkgTokenSpaceGuid.PcdCapsuleFmpSupport|$(CAPSULE_SUPPORT)
-!if $(CAPSULE_SUPPORT) == TRUE
+!if $(CAPSULE_SUPPORT) && $(NESTED_FMP_CAPSULE_ENABLE) == TRUE
+  ## Wheter platform uses nested capsules or not.
+  gEfiMdeModulePkgTokenSpaceGuid.PcdUseNestedFmpCapsuleFormat|TRUE
+  # Keys for signature of top capsule
   !include DasharoPayloadPkg/CapsuleRootKey.inc
 !endif
 
