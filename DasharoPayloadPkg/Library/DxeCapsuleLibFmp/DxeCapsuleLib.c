@@ -1761,6 +1761,12 @@ IsPayloadValidFmpCapsule (
   DEBUG ((DEBUG_INFO, "CapsuleHeaderAddress - 0x%x\n", *CapsuleHeader));
   DEBUG ((DEBUG_INFO, "TopCapsuleHeaderAddress - 0x%x\n", TopCapsuleHeader));
   DEBUG ((DEBUG_ERROR, "Validating top Capsule\n"));
+
+  if (!IsFmpCapsuleGuid (&TopCapsuleHeader->CapsuleGuid)) {
+    RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
+    return EFI_INVALID_PARAMETER;
+  }
+
   Status = ValidateFmpCapsule (TopCapsuleHeader, NULL);
   if (EFI_ERROR (Status)) {
     RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_INVALID_PARAMETER);
@@ -1795,6 +1801,14 @@ IsPayloadValidFmpCapsule (
       Image = (UINT8 *)&ImageHeader->UpdateHardwareInstance;
     } else {
       Image = (UINT8 *)&ImageHeader->ImageCapsuleSupport;
+    }
+  }
+
+if (ImageHeader->Version >= EFI_FIRMWARE_MANAGEMENT_CAPSULE_IMAGE_HEADER_INIT_VERSION) {
+    if (ImageHeader->ImageCapsuleSupport != CAPSULE_SUPPORT_AUTHENTICATION) {
+      DEBUG ((DEBUG_ERROR, "The top capsule only supports authentication\n"));
+      RecordCapsuleStatusVariable (TopCapsuleHeader, EFI_UNSUPPORTED);
+      return EFI_UNSUPPORTED;
     }
   }
 
@@ -1853,9 +1867,7 @@ IsPayloadValidFmpCapsule (
     return EFI_INVALID_PARAMETER;
   }
 
-  // TODO: should probably compare depex too 
   if (!(
-         (CompareGuid(&TopCapsuleHeader->CapsuleGuid, &NestedCapsuleHeader->CapsuleGuid)) && // XXX: superfluous due to the checks above? 
          (TopCapsuleHeader->HeaderSize == NestedCapsuleHeader->HeaderSize) &&
          (TopCapsuleHeader->Flags == NestedCapsuleHeader->Flags)
        )
@@ -1893,8 +1905,6 @@ IsPayloadValidFmpCapsule (
     RecordCapsuleStatusVariable (TopCapsuleHeader, Status);
     return Status;
   }
-
-  // TODO: validate FMP_PAYLOAD_HEADER of top and bottom capsules matching each other? 
 
   if (EmbeddedDriverCount != NULL) {
     *EmbeddedDriverCount = NestedEmbeddedDriverCount;
